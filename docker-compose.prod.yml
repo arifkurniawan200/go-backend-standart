@@ -1,0 +1,59 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./docker/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./docker/certificates:/certificates:ro
+      - traefik-logs:/var/log/traefik
+    environment:
+      - TZ=Asia/Jakarta
+    networks:
+      - backend
+    command:
+      - "--log.format=json"
+      - "--accesslog.format=json"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-api
+    restart: always
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.services.api.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.api-strip.stripprefix.prefixes=/api/v1"
+      - "traefik.http.routers.api.middlewares=api-strip"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  traefik-logs:

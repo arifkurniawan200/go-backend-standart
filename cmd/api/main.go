@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -41,6 +42,9 @@ func main() {
 	mux := http.NewServeMux()
 	userHandler.RegisterRoutes(mux)
 
+	// Health check endpoint (for Traefik health checks)
+	mux.HandleFunc("GET /health", healthCheck)
+
 	// Create server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
@@ -73,4 +77,15 @@ func main() {
 	}
 
 	zapLogger.Info("Server exited gracefully")
+}
+
+// healthCheck returns 200 OK with JSON status for Traefik health checks
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "healthy",
+		"service": "go-backend-standart",
+		"time": time.Now().Format(time.RFC3339),
+	})
 }

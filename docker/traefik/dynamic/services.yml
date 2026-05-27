@@ -1,0 +1,117 @@
+http:
+  # ============================================
+  # Routers
+  # ============================================
+  routers:
+    api:
+      rule: "PathPrefix(`/api/v1`)"
+      service: api
+      entrypoints:
+        - web
+      middlewares:
+        - strip-prefix
+        - compress
+        - rate-limit
+
+    api-https:
+      rule: "PathPrefix(`/api/v1`)"
+      service: api
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - strip-prefix
+        - compress
+        - rate-limit
+
+    dashboard:
+      rule: "Host(`traefik.localhost`)"
+      service: api@internal
+      entrypoints:
+        - web
+
+  # ============================================
+  # Services
+  # ============================================
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8080"
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout: 3s
+          hostname: api
+          followRedirects: true
+        responseForwarding:
+          flushInterval: 100ms
+
+  # ============================================
+  # Middlewares
+  # ============================================
+  middlewares:
+    # Strip /api/v1 prefix from path before forwarding
+    strip-prefix:
+      stripPrefix:
+        prefixes:
+          - "/api/v1"
+        forceSlash: false
+
+    # Gzip compression
+    compress:
+      compress:
+        excludedContentTypes:
+          - "application/grpc"
+        minResponseBodyBytes: 100
+        defaultEncoding: gzip
+
+    # Rate limiting - 100 requests per second, burst 50
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1s
+        averageByIp: true
+
+    # Retry on failure
+    retry:
+      retry:
+        attempts: 3
+        initialInterval: 100ms
+
+    # Circuit breaker
+    circuit-breaker:
+      circuitBreaker:
+        expression: "NetworkErrorRatio() > 0.30"
+
+    # Security headers
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        customResponseHeaders:
+          X-Content-Type-Options: "nosniff"
+          X-Frame-Options: "DENY"
+
+    # CORS
+    cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - PATCH
+          - OPTIONS
+        accessControlAllowOriginList:
+          - "*"
+        accessControlAllowHeaders:
+          - "*"
+        accessControlExposeHeaders:
+          - "*"
+        accessControlMaxAge: 86400
+        addVaryHeader: true

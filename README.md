@@ -134,6 +134,81 @@ func workerPool(ctx context.Context, jobs <-chan Job, workers int) {
 | `go vet` | Static analysis |
 | `make` | Task automation |
 
+## 🐳 Docker & Traefik
+
+### Architecture
+
+```
+                    ┌─────────────────────────────┐
+                    │          Traefik            │
+                    │   (Reverse Proxy / Gateway) │
+                    │                             │
+  Internet ────────►│  :80 ─► Router ─► Service  │
+                    │                     │       │
+                    │                     ▼       │
+                    │              [Middleware]    │
+                    │           Rate Limit        │
+                    │           Strip Prefix      │
+                    │           CORS              │
+                    │           Compress          │
+                    └─────────┬───────────────────┘
+                              │ HTTP
+           ┌──────────────────┼──────────────────┐
+           │                  ▼                  │
+           │  ┌────────────────────────────┐   │
+           │  │   Go API (Backend)         │   │
+           │  │   Port: 8080              │   │
+           │  │   /health → healthy       │   │
+           │  │   /api/v1/* → handlers    │   │
+           │  └────────────────────────────┘   │
+           └───────────────────────────────────┘
+```
+
+### Quick Start with Docker
+
+```bash
+# Start all services (Traefik + API)
+make docker-up
+
+# Test routing
+make docker-test
+
+# View Traefik logs
+make docker-logs-traefik
+
+# Stop services
+make docker-down
+```
+
+### Endpoints
+
+| URL | Description |
+|-----|-------------|
+| `http://localhost/api/v1/users` | API endpoint (via Traefik) |
+| `http://localhost/health` | Health check |
+| `http://localhost:8080/dashboard/` | Traefik Dashboard |
+
+### Middleware Pipeline
+
+```
+Request → Rate Limit → Strip Prefix → CORS → Compress → Backend
+          (100 req/s)  (/api/v1 → /)  (OPTIONS)  (gzip)
+```
+
+### Files
+
+```
+docker/
+├── docker-compose.yml          # Dev compose
+├── docker-compose.prod.yml     # Prod compose
+├── Dockerfile                  # Multi-stage build
+├── traefik/
+│   ├── traefik.yml             # Static config (entrypoints, providers)
+│   └── dynamic/
+│       └── services.yml        # Dynamic config (routers, services, middleware)
+└── .env.example
+```
+
 ## 📄 License
 
 MIT
