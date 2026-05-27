@@ -1,0 +1,87 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./docker/traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./docker/certificates:/certificates:ro
+      - traefik-logs:/var/log/traefik
+    environment:
+      - TZ=Asia/Jakarta
+    networks:
+      - backend
+    depends_on:
+      - api
+      - auth
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: go-api
+    restart: always
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=PathPrefix(`/api/v1`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.services.api.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.api-strip.stripprefix.prefixes=/api/v1"
+      - "traefik.http.routers.api.middlewares=api-strip,auth-middleware"
+      - "traefik.http.middlewares.api-auth.forwardauth.address=http://auth:8080/auth/validate"
+      - "traefik.http.middlewares.api-auth.authResponseHeaders=X-User-Id,X-User-Email,X-User-Role"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  auth:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    container_name: go-auth
+    restart: always
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth.entrypoints=web"
+      - "traefik.http.services.auth.loadbalancer.server.port=8080"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  traefik-logs:

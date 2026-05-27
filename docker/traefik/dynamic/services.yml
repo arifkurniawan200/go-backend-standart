@@ -3,7 +3,8 @@ http:
   # Routers
   # ============================================
   routers:
-    api:
+    # API Router - HTTP
+    api-http:
       rule: "PathPrefix(`/api/v1`)"
       service: api
       entrypoints:
@@ -12,7 +13,33 @@ http:
         - strip-prefix
         - compress
         - rate-limit
+        - cors
+        - security-headers
 
+    # Auth Router - HTTP
+    auth-http:
+      rule: "PathPrefix(`/auth`)"
+      service: auth
+      entrypoints:
+        - web
+      middlewares:
+        - cors
+
+    # Redirect HTTP to HTTPS
+    https-redirect:
+      rule: "HostRegexp(`{host:.+}`)"
+      service: https-redirect
+      entrypoints:
+        - web
+
+    # Dashboard HTTP
+    dashboard-http:
+      rule: "Host(`traefik.localhost`)"
+      service: api@internal
+      entrypoints:
+        - web
+
+    # API Router - HTTPS
     api-https:
       rule: "PathPrefix(`/api/v1`)"
       service: api
@@ -20,21 +47,42 @@ http:
         - websecure
       tls:
         certResolver: letsencrypt
+        domains:
+          - main: "localhost"
+            sans:
+              - "*.localhost"
       middlewares:
         - strip-prefix
         - compress
         - rate-limit
+        - cors
+        - security-headers
 
-    dashboard:
+    # Auth Router - HTTPS
+    auth-https:
+      rule: "PathPrefix(`/auth`)"
+      service: auth
+      entrypoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - cors
+
+    # Dashboard HTTPS
+    dashboard-https:
       rule: "Host(`traefik.localhost`)"
       service: api@internal
       entrypoints:
-        - web
+        - websecure
+      tls:
+        certResolver: letsencrypt
 
   # ============================================
   # Services
   # ============================================
   services:
+    # Main API Service
     api:
       loadBalancer:
         servers:
@@ -44,15 +92,38 @@ http:
           interval: 10s
           timeout: 3s
           hostname: api
-          followRedirects: true
         responseForwarding:
           flushInterval: 100ms
+        circuitBreaker:
+          expression: "NetworkErrorRatio() > 0.30"
+        retries: 3
+
+    # Auth Service
+    auth:
+      loadBalancer:
+        servers:
+          - url: "http://auth:8080"
+        healthCheck:
+          path: /auth/health
+          interval: 10s
+          timeout: 3s
+          hostname: auth
+        responseForwarding:
+          flushInterval: 100ms
+        circuitBreaker:
+          expression: "NetworkErrorRatio() > 0.30"
+
+    # HTTPS redirect service
+    https-redirect:
+      loadBalancer:
+        servers:
+          - url: "https://localhost:443"
 
   # ============================================
   # Middlewares
   # ============================================
   middlewares:
-    # Strip /api/v1 prefix from path before forwarding
+    # Strip /api/v1 prefix
     strip-prefix:
       stripPrefix:
         prefixes:
@@ -67,7 +138,7 @@ http:
         minResponseBodyBytes: 100
         defaultEncoding: gzip
 
-    # Rate limiting - 100 requests per second, burst 50
+    # Rate limiting
     rate-limit:
       rateLimit:
         average: 100
@@ -75,16 +146,20 @@ http:
         period: 1s
         averageByIp: true
 
-    # Retry on failure
+    # Retry
     retry:
       retry:
         attempts: 3
         initialInterval: 100ms
+        maxInterval: 500ms
+        maxElapsedTime: 10s
 
     # Circuit breaker
     circuit-breaker:
       circuitBreaker:
         expression: "NetworkErrorRatio() > 0.30"
+        baseDuration: 5s
+        recoveryDuration: 10s
 
     # Security headers
     security-headers:
@@ -93,9 +168,15 @@ http:
         contentTypeNosniff: true
         browserXssFilter: true
         referrerPolicy: "strict-origin-when-cross-origin"
+        forceSTSHeader: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
         customResponseHeaders:
           X-Content-Type-Options: "nosniff"
           X-Frame-Options: "DENY"
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
 
     # CORS
     cors:
@@ -107,11 +188,25 @@ http:
           - DELETE
           - PATCH
           - OPTIONS
+          - HEAD
         accessControlAllowOriginList:
           - "*"
+          - "http://localhost:3000"
         accessControlAllowHeaders:
           - "*"
         accessControlExposeHeaders:
-          - "*"
+          - "X-Request-ID"
+          - "X-Response-Time"
         accessControlMaxAge: 86400
         addVaryHeader: true
+        accessControlAllowCredentials: true
+
+    # Forward auth to auth service (for protected routes)
+    auth-forward:
+      forwardAuth:
+        address: "http://auth:8080/auth/validate"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - "X-User-Id"
+          - "X-User-Email"
+          - "X-User-Role"

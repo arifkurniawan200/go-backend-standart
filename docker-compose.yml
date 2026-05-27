@@ -7,6 +7,7 @@ services:
       - "80:80"
       - "443:443"
       - "8080:8080"
+      - "9090:9090"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
@@ -16,6 +17,9 @@ services:
       - TZ=Asia/Jakarta
     networks:
       - backend
+    command:
+      - "--log.format=json"
+      - "--accesslog.format=json"
 
   api:
     build:
@@ -35,9 +39,8 @@ services:
       - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
       - "traefik.http.routers.api.entrypoints=web"
       - "traefik.http.services.api.loadbalancer.server.port=8080"
-      - "traefik.http.services.api.loadbalancer.healthcheck.path=/health"
-      - "traefik.http.services.api.loadbalancer.healthcheck.interval=10s"
-      - "traefik.http.services.api.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.middlewares.api-strip.stripprefix.prefixes=/api/v1"
+      - "traefik.http.routers.api.middlewares=api-strip"
     networks:
       - backend
     healthcheck:

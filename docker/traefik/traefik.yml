@@ -7,6 +7,7 @@ entryPoints:
     address: ":80"
   websecure:
     address: ":443"
+    http2: true
 
 providers:
   docker:
@@ -16,6 +17,15 @@ providers:
   file:
     directory: "/etc/traefik/dynamic"
     watch: true
+
+# Let's Encrypt Certificate Resolver
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@example.com
+      storage: /certificates/acme.json
+      httpChallenge:
+        entryPoint: web
 
 log:
   level: INFO

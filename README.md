@@ -1,30 +1,42 @@
 # Go Backend Standards
 
-Scalable Go backend project structure with **Clean Architecture**, **Git workflow standards**, and **best practices**.
+Scalable Go backend project structure with **Clean Architecture**, **Git workflow standards**, **Traefik integration**, and **observability**.
 
 ## 📁 Project Structure
 
 ```
 myapp/
-├── cmd/                    # Entry point per service
-│   └── api/
+├── cmd/
+│   ├── api/                    # Main API service
+│   │   └── main.go
+│   └── auth/                  # Auth service
 │       └── main.go
-├── internal/               # Private application code
-│   ├── domain/             # Entity, value object (no dependencies)
-│   ├── repository/         # Data access interface + implementation
-│   ├── usecase/            # Business logic
-│   └── handler/            # HTTP/gRPC handlers
-├── pkg/                    # Public packages (sharable across projects)
+├── internal/
+│   ├── domain/               # Entity, value object
+│   ├── repository/           # Data access (interface-based)
+│   ├── usecase/              # Business logic
+│   ├── handler/              # HTTP handlers
+│   └── middleware/           # JWT, auth middleware
+├── pkg/
 │   ├── validator/
 │   ├── response/
 │   └── logger/
-├── config/                 # Configuration
-├── scripts/                # Build, migration, code gen scripts
-├── .github/
-│   └── workflows/
-│       └── ci.yml
+├── config/
+├── docker/
+│   ├── traefik/
+│   │   ├── traefik.yml
+│   │   └── dynamic/
+│   │       └── services.yml
+│   └── monitoring/
+│       ├── prometheus/
+│       └── grafana/
+├── docker-compose.yml          # Dev (Traefik + API)
+├── docker-compose.prod.yml     # Production
+├── docker-compose.multi.yml    # Multi-service (API + Auth)
+├── docker-compose.monitoring.yml # Monitoring (Prometheus + Grafana)
+├── Dockerfile
+├── Dockerfile.auth
 ├── Makefile
-├── golangci.yml
 └── go.mod
 ```
 
@@ -34,18 +46,105 @@ myapp/
 # Install dependencies
 go mod tidy
 
-# Run
+# Run API
 go run cmd/api/main.go
+
+# Run Auth service
+go run cmd/auth/main.go
 
 # Build
 make build
+make build-auth
 
 # Test
 make test
-
-# Lint
-make lint
 ```
+
+## 🐳 Docker Compose Options
+
+### 1. Basic (Traefik + API)
+```bash
+make docker-up        # Start
+make docker-down      # Stop
+make docker-test      # Test routing
+make docker-logs      # View logs
+```
+
+### 2. Production
+```bash
+make docker-up-prod   # Start with resource limits
+make docker-down-prod  # Stop
+```
+
+### 3. Multi-Service (API + Auth)
+```bash
+make docker-up-multi   # Start API + Auth
+make docker-down-multi  # Stop
+make docker-logs-api   # API logs
+make docker-logs-auth  # Auth logs
+```
+
+### 4. Monitoring (Prometheus + Grafana)
+```bash
+make docker-up-monitoring   # Start monitoring
+make docker-down-monitoring  # Stop
+# Prometheus: http://localhost:9090
+# Grafana:    http://localhost:3000 (admin/admin)
+```
+
+## 🌐 Endpoints
+
+| URL | Service | Description |
+|-----|---------|-------------|
+| `http://localhost/api/v1/users` | API | REST endpoints |
+| `http://localhost/auth/login` | Auth | Login endpoint |
+| `http://localhost/auth/register` | Auth | Register endpoint |
+| `http://localhost/health` | API | Health check |
+| `http://localhost/auth/health` | Auth | Auth health check |
+| `http://localhost:8080/dashboard/` | Traefik | Dashboard |
+| `http://localhost:9090` | Prometheus | Metrics |
+| `http://localhost:3000` | Grafana | Dashboards |
+
+## 🔒 HTTPS & Security
+
+Traefik dengan Let's Encrypt untuk automatic HTTPS:
+- HTTP → HTTPS redirect
+- Certificate auto-renewal
+- Security headers (HSTS, X-Frame-Options, etc.)
+
+## ⚡ Middleware Pipeline
+
+```
+Request → Rate Limit → Strip Prefix → CORS → Security Headers → Compress → Backend
+          (100/s)      /api/v1→/     (OPTIONS)   (HSTS, etc)      (gzip)
+```
+
+## 🔄 Load Balancing & Resilience
+
+- **Circuit Breaker**: `NetworkErrorRatio() > 0.30`
+- **Retries**: 3 attempts with exponential backoff
+- **Health Checks**: Every 10s per service
+- **Connection pooling**: Configured per service
+
+## 📊 Monitoring Stack
+
+### Prometheus Metrics
+- Traefik request rate, latency, errors
+- Service-level metrics
+- Custom application metrics (future)
+
+### Grafana Dashboards
+- Traefik Overview (request rate, latency, errors)
+- Pre-provisioned datasource & dashboards
+- Default credentials: `admin/admin`
+
+## 🔐 Auth Service
+
+JWT-based authentication:
+- `/auth/login` — Returns access + refresh tokens
+- `/auth/register` — Create new user
+- `/auth/refresh` — Refresh access token
+- `/auth/validate` — Validate token (for forwardAuth)
 
 ## 📋 Git Workflow
 
@@ -54,15 +153,14 @@ make lint
 - `bugfix/` — Bug fixes
 - `hotfix/` — Production fixes
 - `chore/` — Maintenance tasks
-- `refactor/` — Code refactoring
 
-### Commit Convention (Conventional Commits)
+### Commit Convention
 ```
 feat: add user authentication
 fix: handle nil pointer in repository
 chore: upgrade Go to 1.22
 docs: update API documentation
-refactor: extract validation to separate package
+refactor: extract validation
 ```
 
 ### PR Requirements
@@ -80,22 +178,17 @@ type UserRepository interface {
 }
 
 type UserUsecase struct {
-    repo UserRepository // loosely coupled
+    repo UserRepository
 }
 ```
 
 ### 2. Context Propagation
-Always pass `context.Context` for timeout, cancellation, and tracing.
+```go
+func (uc *UserUsecase) FindByID(ctx context.Context, id string) (*User, error)
+```
 
 ### 3. Graceful Shutdown
 ```go
-srv := &http.Server{Addr: ":8080"}
-go func() { srv.ListenAndServe() }()
-
-quit := make(chan os.Signal, 1)
-signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-<-quit
-
 ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 defer cancel()
 srv.Shutdown(ctx)
@@ -120,10 +213,10 @@ func workerPool(ctx context.Context, jobs <-chan Job, workers int) {
 
 ## ⚡ Optimization Tips
 
-1. **JSON encoding** — Use `sonic` or `json-iterator` for speed-critical paths
-2. **Connection pooling** — Set `SetMaxOpenConns`, `SetMaxIdleConns` on DB
+1. **JSON encoding** — Use `sonic` or `json-iterator`
+2. **Connection pooling** — Set `SetMaxOpenConns`, `SetMaxIdleConns`
 3. **Batch insert** for bulk DB writes
-4. **Use `pprof`** for CPU/memory/goroutine profiling
+4. **Use `pprof`** for profiling
 
 ## 📦 Tools
 
@@ -133,81 +226,7 @@ func workerPool(ctx context.Context, jobs <-chan Job, workers int) {
 | `golangci-lint` | Linting + static analysis |
 | `go vet` | Static analysis |
 | `make` | Task automation |
-
-## 🐳 Docker & Traefik
-
-### Architecture
-
-```
-                    ┌─────────────────────────────┐
-                    │          Traefik            │
-                    │   (Reverse Proxy / Gateway) │
-                    │                             │
-  Internet ────────►│  :80 ─► Router ─► Service  │
-                    │                     │       │
-                    │                     ▼       │
-                    │              [Middleware]    │
-                    │           Rate Limit        │
-                    │           Strip Prefix      │
-                    │           CORS              │
-                    │           Compress          │
-                    └─────────┬───────────────────┘
-                              │ HTTP
-           ┌──────────────────┼──────────────────┐
-           │                  ▼                  │
-           │  ┌────────────────────────────┐   │
-           │  │   Go API (Backend)         │   │
-           │  │   Port: 8080              │   │
-           │  │   /health → healthy       │   │
-           │  │   /api/v1/* → handlers    │   │
-           │  └────────────────────────────┘   │
-           └───────────────────────────────────┘
-```
-
-### Quick Start with Docker
-
-```bash
-# Start all services (Traefik + API)
-make docker-up
-
-# Test routing
-make docker-test
-
-# View Traefik logs
-make docker-logs-traefik
-
-# Stop services
-make docker-down
-```
-
-### Endpoints
-
-| URL | Description |
-|-----|-------------|
-| `http://localhost/api/v1/users` | API endpoint (via Traefik) |
-| `http://localhost/health` | Health check |
-| `http://localhost:8080/dashboard/` | Traefik Dashboard |
-
-### Middleware Pipeline
-
-```
-Request → Rate Limit → Strip Prefix → CORS → Compress → Backend
-          (100 req/s)  (/api/v1 → /)  (OPTIONS)  (gzip)
-```
-
-### Files
-
-```
-docker/
-├── docker-compose.yml          # Dev compose
-├── docker-compose.prod.yml     # Prod compose
-├── Dockerfile                  # Multi-stage build
-├── traefik/
-│   ├── traefik.yml             # Static config (entrypoints, providers)
-│   └── dynamic/
-│       └── services.yml        # Dynamic config (routers, services, middleware)
-└── .env.example
-```
+| `docker compose` | Container orchestration |
 
 ## 📄 License
 
