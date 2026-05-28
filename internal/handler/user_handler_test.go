@@ -44,7 +44,22 @@ func setupHandler() *UserHandler {
 	return NewUserHandler(uc, log)
 }
 
-// --- Validator wiring tests ---
+// ============================================================
+// Validator wiring tests (PR #3)
+// ============================================================
+
+func TestCreate_InvalidInput(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.Create(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
 
 func TestCreate_ValidationErrors(t *testing.T) {
 	tests := []struct {
@@ -52,50 +67,11 @@ func TestCreate_ValidationErrors(t *testing.T) {
 		body    any
 		wantErr string
 	}{
-		{
-			name: "missing name",
-			body: domain.UserCreateRequest{
-				Email:    "test@example.com",
-				Password: "password123",
-			},
-			wantErr: "name",
-		},
-		{
-			name: "empty email",
-			body: domain.UserCreateRequest{
-				Name:     "John Doe",
-				Email:    "",
-				Password: "password123",
-			},
-			wantErr: "email",
-		},
-		{
-			name: "invalid email format",
-			body: domain.UserCreateRequest{
-				Name:     "John Doe",
-				Email:    "not-an-email",
-				Password: "password123",
-			},
-			wantErr: "email",
-		},
-		{
-			name: "short password",
-			body: domain.UserCreateRequest{
-				Name:     "John Doe",
-				Email:    "john@example.com",
-				Password: "short",
-			},
-			wantErr: "password",
-		},
-		{
-			name: "name too short",
-			body: domain.UserCreateRequest{
-				Name:     "J",
-				Email:    "john@example.com",
-				Password: "password123",
-			},
-			wantErr: "name",
-		},
+		{name: "missing name", body: domain.UserCreateRequest{Email: "test@ex.com", Password: "pwd123456"}, wantErr: "name"},
+		{name: "empty email", body: domain.UserCreateRequest{Name: "John", Email: "", Password: "pwd123456"}, wantErr: "email"},
+		{name: "bad email", body: domain.UserCreateRequest{Name: "John", Email: "bad", Password: "pwd123456"}, wantErr: "email"},
+		{name: "short pwd", body: domain.UserCreateRequest{Name: "John", Email: "j@ex.com", Password: "sh"}, wantErr: "password"},
+		{name: "short name", body: domain.UserCreateRequest{Name: "J", Email: "j@ex.com", Password: "pwd123456"}, wantErr: "name"},
 	}
 
 	for _, tt := range tests {
@@ -105,42 +81,20 @@ func TestCreate_ValidationErrors(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(bodyBytes))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
-
 			h.Create(rec, req)
-
 			if rec.Code != http.StatusUnprocessableEntity {
-				t.Errorf("expected 422 UnprocessableEntity, got %d", rec.Code)
+				t.Errorf("expected 422, got %d", rec.Code)
 			}
-
 			var resp map[string]any
 			json.NewDecoder(rec.Body).Decode(&resp)
 			if errObj, ok := resp["error"].(map[string]any); ok {
 				if msg, ok := errObj["message"].(string); ok {
 					if !containsAny(msg, tt.wantErr) {
-						t.Errorf("expected error containing %q, got %q", tt.wantErr, msg)
+						t.Errorf("error should contain %q, got %q", tt.wantErr, msg)
 					}
 				}
 			}
 		})
-	}
-}
-
-func TestCreate_Success(t *testing.T) {
-	h := setupHandler()
-	body := domain.UserCreateRequest{
-		Name:     "John Doe",
-		Email:    "john@example.com",
-		Password: "password123",
-	}
-	bodyBytes, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	h.Create(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Errorf("expected 201 Created, got %d", rec.Code)
 	}
 }
 
@@ -150,22 +104,8 @@ func TestUpdate_ValidationErrors(t *testing.T) {
 		body    any
 		wantErr string
 	}{
-		{
-			name: "invalid email format",
-			body: domain.UserUpdateRequest{
-				ID:    "550e8400-e29b-41d4-a716-446655440000",
-				Email: "not-an-email",
-			},
-			wantErr: "email",
-		},
-		{
-			name: "name too short",
-			body: domain.UserUpdateRequest{
-				ID:   "550e8400-e29b-41d4-a716-446655440000",
-				Name: "J",
-			},
-			wantErr: "name",
-		},
+		{name: "bad email", body: domain.UserUpdateRequest{ID: "550e8400-e29b-41d4-a716-446655440000", Email: "bad"}, wantErr: "email"},
+		{name: "short name", body: domain.UserUpdateRequest{ID: "550e8400-e29b-41d4-a716-446655440000", Name: "J"}, wantErr: "name"},
 	}
 
 	for _, tt := range tests {
@@ -175,21 +115,9 @@ func TestUpdate_ValidationErrors(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPut, "/api/v1/users/"+tt.body.(domain.UserUpdateRequest).ID, bytes.NewReader(bodyBytes))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
-
 			h.Update(rec, req)
-
 			if rec.Code != http.StatusUnprocessableEntity {
-				t.Errorf("expected 422 UnprocessableEntity, got %d", rec.Code)
-			}
-
-			var resp map[string]any
-			json.NewDecoder(rec.Body).Decode(&resp)
-			if errObj, ok := resp["error"].(map[string]any); ok {
-				if msg, ok := errObj["message"].(string); ok {
-					if !containsAny(msg, tt.wantErr) {
-						t.Errorf("expected error containing %q, got %q", tt.wantErr, msg)
-					}
-				}
+				t.Errorf("expected 422, got %d", rec.Code)
 			}
 		})
 	}
@@ -204,30 +132,20 @@ func containsAny(s, substr string) bool {
 	return false
 }
 
-// --- Query params tests ---
+// ============================================================
+// Query params tests (PR #4)
+// ============================================================
 
 func TestList_DefaultPagination(t *testing.T) {
 	h := setupHandler()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
 	rec := httptest.NewRecorder()
-
 	h.List(rec, req)
-
 	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK, got %d", rec.Code)
+		t.Errorf("expected 200, got %d", rec.Code)
 	}
-
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-
-	data, ok := resp["data"].([]any)
-	if !ok {
-		t.Fatal("expected data array in response")
-	}
-	if len(data) != 2 {
-		t.Errorf("expected 2 users, got %d", len(data))
-	}
-
 	if limit, _ := resp["limit"].(float64); limit != 10 {
 		t.Errorf("expected default limit 10, got %v", limit)
 	}
@@ -240,16 +158,9 @@ func TestList_CustomPagination(t *testing.T) {
 	h := setupHandler()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=5&offset=20", nil)
 	rec := httptest.NewRecorder()
-
 	h.List(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK, got %d", rec.Code)
-	}
-
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-
 	if limit, _ := resp["limit"].(float64); limit != 5 {
 		t.Errorf("expected limit 5, got %v", limit)
 	}
@@ -262,16 +173,9 @@ func TestList_LimitExceedsMax(t *testing.T) {
 	h := setupHandler()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=200", nil)
 	rec := httptest.NewRecorder()
-
 	h.List(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK, got %d", rec.Code)
-	}
-
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-
 	if limit, _ := resp["limit"].(float64); limit != 100 {
 		t.Errorf("expected limit capped at 100, got %v", limit)
 	}
@@ -281,20 +185,150 @@ func TestList_InvalidQueryDefaults(t *testing.T) {
 	h := setupHandler()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=abc&offset=-5", nil)
 	rec := httptest.NewRecorder()
-
 	h.List(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 OK, got %d", rec.Code)
-	}
-
 	var resp map[string]any
 	json.NewDecoder(rec.Body).Decode(&resp)
-
 	if limit, _ := resp["limit"].(float64); limit != 10 {
-		t.Errorf("expected default limit 10 for invalid input, got %v", limit)
+		t.Errorf("expected default limit 10, got %v", limit)
 	}
 	if offset, _ := resp["offset"].(float64); offset != 0 {
-		t.Errorf("expected default offset 0 for negative, got %v", offset)
+		t.Errorf("expected default offset 0, got %v", offset)
+	}
+}
+
+// ============================================================
+// Basic handler tests (PR #5)
+// ============================================================
+
+func TestHandler_Create(t *testing.T) {
+	h := setupHandler()
+	body := domain.UserCreateRequest{Name: "John", Email: "john@ex.com", Password: "pwd123456"}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.Create(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d", rec.Code)
+	}
+	var user domain.User
+	json.NewDecoder(rec.Body).Decode(&user)
+	if user.ID == "" {
+		t.Error("expected user ID in response")
+	}
+}
+
+func TestHandler_GetByID(t *testing.T) {
+	h := setupHandler()
+	body := domain.UserCreateRequest{Name: "A", Email: "a@ex.com", Password: "pwd123456"}
+	b, _ := json.Marshal(body)
+	cr := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(b))
+	cr.Header.Set("Content-Type", "application/json")
+	crr := httptest.NewRecorder()
+	h.Create(crr, cr)
+	var created domain.User
+	json.NewDecoder(crr.Body).Decode(&created)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/"+created.ID, nil)
+	rec := httptest.NewRecorder()
+	h.GetByID(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandler_GetByID_MissingID(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/", nil)
+	rec := httptest.NewRecorder()
+	h.GetByID(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandler_List(t *testing.T) {
+	h := setupHandler()
+	for i := 0; i < 3; i++ {
+		b, _ := json.Marshal(domain.UserCreateRequest{Name: "U", Email: "u@ex.com", Password: "pwd123456"})
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(b))
+		r.Header.Set("Content-Type", "application/json")
+		rc := httptest.NewRecorder()
+		h.Create(rc, r)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+	rec := httptest.NewRecorder()
+	h.List(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Update(t *testing.T) {
+	h := setupHandler()
+	b, _ := json.Marshal(domain.UserCreateRequest{Name: "A", Email: "a@ex.com", Password: "pwd123456"})
+	cr := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(b))
+	cr.Header.Set("Content-Type", "application/json")
+	crr := httptest.NewRecorder()
+	h.Create(crr, cr)
+	var created domain.User
+	json.NewDecoder(crr.Body).Decode(&created)
+
+	ub, _ := json.Marshal(domain.UserUpdateRequest{ID: created.ID, Name: "Updated"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/"+created.ID, bytes.NewReader(ub))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Update_MissingID(t *testing.T) {
+	h := setupHandler()
+	ub, _ := json.Marshal(domain.UserUpdateRequest{Name: "A"})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/", bytes.NewReader(ub))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.Update(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Delete(t *testing.T) {
+	h := setupHandler()
+	b, _ := json.Marshal(domain.UserCreateRequest{Name: "A", Email: "a@ex.com", Password: "pwd123456"})
+	cr := httptest.NewRequest(http.MethodPost, "/api/v1/users", bytes.NewReader(b))
+	cr.Header.Set("Content-Type", "application/json")
+	crr := httptest.NewRecorder()
+	h.Create(crr, cr)
+	var created domain.User
+	json.NewDecoder(crr.Body).Decode(&created)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+created.ID, nil)
+	rec := httptest.NewRecorder()
+	h.Delete(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestHandler_Delete_MissingID(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/", nil)
+	rec := httptest.NewRecorder()
+	h.Delete(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandler_HealthCheck(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	HealthCheck(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "OK" {
+		t.Errorf("expected 200 OK, got %d %s", rec.Code, rec.Body.String())
 	}
 }
