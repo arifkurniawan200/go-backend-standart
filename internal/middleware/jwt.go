@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -78,14 +79,14 @@ type contextKey string
 const claimsContextKey contextKey = "claims"
 
 // WithClaims adds claims to context
-func WithClaims(ctx interface{}, claims *JWTClaims) interface{} {
-	return ctx
+func WithClaims(ctx context.Context, claims *JWTClaims) context.Context {
+	return context.WithValue(ctx, claimsContextKey, claims)
 }
 
 // GetClaims retrieves claims from context
-func GetClaims(ctx interface{}) (*JWTClaims, bool) {
-	// In real implementation, extract from context
-	return nil, false
+func GetClaims(ctx context.Context) (*JWTClaims, bool) {
+	claims, ok := ctx.Value(claimsContextKey).(*JWTClaims)
+	return claims, ok
 }
 
 // Errors
