@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/arifkurniawan200/go-backend-standart/internal/domain"
 	"github.com/arifkurniawan200/go-backend-standart/internal/repository"
 	"github.com/arifkurniawan200/go-backend-standart/internal/usecase"
 	"github.com/arifkurniawan200/go-backend-standart/pkg/response"
+	"github.com/go-playground/validator/v10"
 	"go.uber.org/zap"
 )
 
@@ -19,6 +22,7 @@ import (
 type UserHandler struct {
 	uc    *usecase.UserUsecase
 	log   *zap.Logger
+	valid *validator.Validate
 }
 
 // NewUserHandler creates a new user handler
@@ -26,7 +30,20 @@ func NewUserHandler(uc *usecase.UserUsecase, log *zap.Logger) *UserHandler {
 	return &UserHandler{
 		uc:  uc,
 		log: log,
+		valid: validator.New(),
 	}
+}
+
+// formatValidationError converts validator errors to a human-readable string
+func formatValidationError(err error) string {
+	var fieldErrors []string
+	if ve, ok := err.(validator.ValidationErrors); ok {
+		for _, fe := range ve {
+			fieldErrors = append(fieldErrors, fmt.Sprintf("field %s failed on %s", fe.Field(), fe.Tag()))
+		}
+		return strings.Join(fieldErrors, "; ")
+	}
+	return err.Error()
 }
 
 // RegisterRoutes registers all user routes
@@ -47,6 +64,11 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.Warn("Invalid request body", "error", err)
 		response.WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if err := h.valid.Struct(req); err != nil {
+		response.WriteError(w, http.StatusUnprocessableEntity, formatValidationError(err))
 		return
 	}
 
@@ -126,6 +148,11 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.ID = id
+
+	if err := h.valid.Struct(req); err != nil {
+		response.WriteError(w, http.StatusUnprocessableEntity, formatValidationError(err))
+		return
+	}
 
 	user, err := h.uc.Update(ctx, &req)
 	if err != nil {
