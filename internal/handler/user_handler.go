@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,6 +116,20 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	limit := 10
 	offset := 0
+
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+			if limit > 100 {
+				limit = 100
+			}
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
 
 	users, err := h.uc.List(ctx, limit, offset)
 	if err != nil {
