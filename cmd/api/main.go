@@ -14,6 +14,7 @@ import (
 
 	"github.com/arifkurniawan200/go-backend-standart/config"
 	"github.com/arifkurniawan200/go-backend-standart/internal/handler"
+	"github.com/arifkurniawan200/go-backend-standart/internal/middleware"
 	"github.com/arifkurniawan200/go-backend-standart/internal/repository"
 	"github.com/arifkurniawan200/go-backend-standart/internal/usecase"
 	"github.com/arifkurniawan200/go-backend-standart/pkg/logger"
@@ -40,10 +41,16 @@ func main() {
 
 	// Setup router
 	mux := http.NewServeMux()
-	userHandler.RegisterRoutes(mux)
 
-	// Health check endpoint (for Traefik health checks)
+	// Public routes
 	mux.HandleFunc("GET /health", healthCheck)
+
+	// Protected routes — wrapped with JWT middleware
+	mux.Handle("POST /api/v1/users", middleware.JWTMiddleware(http.HandlerFunc(userHandler.Create)))
+	mux.Handle("GET /api/v1/users/{id}", middleware.JWTMiddleware(http.HandlerFunc(userHandler.GetByID)))
+	mux.Handle("GET /api/v1/users", middleware.JWTMiddleware(http.HandlerFunc(userHandler.List)))
+	mux.Handle("PUT /api/v1/users/{id}", middleware.JWTMiddleware(http.HandlerFunc(userHandler.Update)))
+	mux.Handle("DELETE /api/v1/users/{id}", middleware.JWTMiddleware(http.HandlerFunc(userHandler.Delete)))
 
 	// Create server
 	srv := &http.Server{
