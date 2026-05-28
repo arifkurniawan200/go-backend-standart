@@ -26,12 +26,15 @@ func (m *mockUserRepo) Create(ctx context.Context, user *domain.User) error {
 	m.users[user.ID] = user
 	return nil
 }
-func (m *mockUserRepo) FindByID(ctx context.Context, id string) (*domain.User, error) { return nil, nil }
+func (m *mockUserRepo) FindByID(ctx context.Context, id string) (*domain.User, error)    { return nil, nil }
 func (m *mockUserRepo) FindByEmail(ctx context.Context, email string) (*domain.User, error) { return nil, nil }
-func (m *mockUserRepo) Update(ctx context.Context, user *domain.User) error           { return nil }
-func (m *mockUserRepo) Delete(ctx context.Context, id string) error                    { return nil }
+func (m *mockUserRepo) Update(ctx context.Context, user *domain.User) error              { return nil }
+func (m *mockUserRepo) Delete(ctx context.Context, id string) error                       { return nil }
 func (m *mockUserRepo) List(ctx context.Context, limit, offset int) ([]*domain.User, error) {
-	return nil, nil
+	return []*domain.User{
+		{ID: "1", Name: "Alice", Email: "alice@example.com"},
+		{ID: "2", Name: "Bob", Email: "bob@example.com"},
+	}, nil
 }
 
 func setupHandler() *UserHandler {
@@ -40,6 +43,8 @@ func setupHandler() *UserHandler {
 	log := zaptest.NewLogger(nil)
 	return NewUserHandler(uc, log)
 }
+
+// --- Validator wiring tests ---
 
 func TestCreate_ValidationErrors(t *testing.T) {
 	tests := []struct {
@@ -191,11 +196,105 @@ func TestUpdate_ValidationErrors(t *testing.T) {
 }
 
 func containsAny(s, substr string) bool {
-	// simple substring check (production code would use more robust matching)
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
 			return true
 		}
 	}
 	return false
+}
+
+// --- Query params tests ---
+
+func TestList_DefaultPagination(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+	rec := httptest.NewRecorder()
+
+	h.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	data, ok := resp["data"].([]any)
+	if !ok {
+		t.Fatal("expected data array in response")
+	}
+	if len(data) != 2 {
+		t.Errorf("expected 2 users, got %d", len(data))
+	}
+
+	if limit, _ := resp["limit"].(float64); limit != 10 {
+		t.Errorf("expected default limit 10, got %v", limit)
+	}
+	if offset, _ := resp["offset"].(float64); offset != 0 {
+		t.Errorf("expected default offset 0, got %v", offset)
+	}
+}
+
+func TestList_CustomPagination(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=5&offset=20", nil)
+	rec := httptest.NewRecorder()
+
+	h.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if limit, _ := resp["limit"].(float64); limit != 5 {
+		t.Errorf("expected limit 5, got %v", limit)
+	}
+	if offset, _ := resp["offset"].(float64); offset != 20 {
+		t.Errorf("expected offset 20, got %v", offset)
+	}
+}
+
+func TestList_LimitExceedsMax(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=200", nil)
+	rec := httptest.NewRecorder()
+
+	h.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if limit, _ := resp["limit"].(float64); limit != 100 {
+		t.Errorf("expected limit capped at 100, got %v", limit)
+	}
+}
+
+func TestList_InvalidQueryDefaults(t *testing.T) {
+	h := setupHandler()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users?limit=abc&offset=-5", nil)
+	rec := httptest.NewRecorder()
+
+	h.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rec.Code)
+	}
+
+	var resp map[string]any
+	json.NewDecoder(rec.Body).Decode(&resp)
+
+	if limit, _ := resp["limit"].(float64); limit != 10 {
+		t.Errorf("expected default limit 10 for invalid input, got %v", limit)
+	}
+	if offset, _ := resp["offset"].(float64); offset != 0 {
+		t.Errorf("expected default offset 0 for negative, got %v", offset)
+	}
 }
